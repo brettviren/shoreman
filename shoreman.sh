@@ -108,9 +108,25 @@ onexit() {
   sleep 1
 }
 
+monitor_commands() {
+    local mon_file="$1"
+    rm -f "$mon_file"
+    touch "$mon_file"
+    local jpid
+    while true ; do
+        for jpid in $pids ; do
+            if [ -f "/proc/$jpid/stat" ] ; then
+                cat "/proc/$jpid/stat" >> "$mon_file"
+            fi
+        done
+        sleep 1
+    done
+}
+
 main() {
   local procfile="$1"
   local env_file="$2"
+  local mon_file="$3"
 
   # If the --help option is given, show the usage message and exit.
   expr -- "$*" : ".*--help" >/dev/null && {
@@ -121,10 +137,18 @@ main() {
   load_env_file "$env_file"
   run_procfile "$procfile"
 
+  if [ -n "$mon_file" ] ; then
+      monitor_commands "$mon_file" &
+      monitor_pid=$!
+  fi
+
   trap onexit INT TERM
 
   # Wait for the children to finish executing before exiting.
   wait $pids
+  if [ -n "$monitor_pid" ] ; then
+      kill $monitor_pid
+  fi
 }
 
 main "$@"
