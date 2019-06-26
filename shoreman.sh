@@ -110,14 +110,22 @@ onexit() {
 
 monitor_commands() {
     local mon_file="$1"
-    rm -f "$mon_file"
-    touch "$mon_file"
+    cat /dev/null > "$mon_file"
     local jpid
+    local sfile
     while true ; do
         for jpid in $pids ; do
-            if [ -f "/proc/$jpid/stat" ] ; then
-                cat "/proc/$jpid/stat" >> "$mon_file"
+            if [ ! -d /proc/$jpid ] ; then
+                continue;
             fi
+            for sfile in /proc/$jpid/task/*/stat; do
+                # note, file can disapear between these two lines
+                local line=$(cat "$sfile")
+                if [ -z "$line" ] ; then
+                    continue;
+                fi
+                echo "$(date +%s) $jpid $line" >> "$mon_file"
+            done
         done
         sleep 1
     done
