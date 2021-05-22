@@ -108,9 +108,13 @@ onexit() {
   sleep 1
 }
 
-monitor_commands() {
+cpumon_commands() {
     local mon_file="$1"
-    cat /dev/null > "$mon_file"
+    # See description of /proc/[pid]/stat in proc(5) for fields.
+    # Note, we prepend timestamp and main parent process ID.  Check
+    # that PPID==PID (PID is first column from stat) to differentiate
+    # between "main" thread and other threads.
+    echo "# time PPID </proc/PID/task/*/stat see proc(5)>" > "$mon_file"
     local jpid
     local sfile
     while true ; do
@@ -131,10 +135,26 @@ monitor_commands() {
     done
 }
 
+gpumon_commands() {
+    local mon_file="$1"
+    cat /dev/null > "$mon_file"
+
+    local gpu_query='index,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used,temperature.gpu,temperature.memory,power.draw'
+    local head=$(nvidia-smi --format=csv --query-gpu="$gpu_query" |head -1)
+    echo "# time, $head" > "$mon_file"
+
+    while true ; do
+        local line=$(nvidia-smi --format=csv,noheader --query-gpu="$gpu_query")
+        echo "$(date +%s), $line" >> "$mon_file"
+        sleep 1
+    done
+}
+
 main() {
   local procfile="$1"
   local env_file="$2"
-  local mon_file="$3"
+  local cpumon_file="$3"
+  local gpumon_file="$4"
 
   # If the --help option is given, show the usage message and exit.
   expr -- "$*" : ".*--help" >/dev/null && {
@@ -145,17 +165,24 @@ main() {
   load_env_file "$env_file"
   run_procfile "$procfile"
 
-  if [ -n "$mon_file" ] ; then
-      monitor_commands "$mon_file" &
-      monitor_pid=$!
+  if [ -n "$cpumon_file" ] ; then
+      cpumon_commands "$cpumon_file" &
+      cpumon_pid=$!
+  fi
+  if [ -n "$gpumon_file" ] ; then
+      gpumon_commands "$gpumon_file" &
+      gpumon_pid=$!
   fi
 
   trap onexit INT TERM
 
   # Wait for the children to finish executing before exiting.
   wait $pids
-  if [ -n "$monitor_pid" ] ; then
-      kill $monitor_pid
+  if [ -n "$cpumon_pid" ] ; then
+      kill $cpumon_pid
+  fi
+  if [ -n "$gpumon_pid" ] ; then
+      kill $gpumon_pid
   fi
 }
 
